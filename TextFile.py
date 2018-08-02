@@ -144,13 +144,13 @@ class TextFile:
             terms = ''
             line = line.replace('*','')
             line = nltk.word_tokenize(line)
-            if 'PMID-' in line:                   
+            if 'PMID-' in line: ## take the PMID 
                 pmid = line[1]
                 doc_terms[pmid] = set()
-            elif 'MH' in line:
+            elif 'MH' in line:  ## take the terms
                 line = ' '.join(line[2:])
                 line = line.lower()
-                if '/' in line: ## ignoring everything after the '/'
+                if '/' in line: ## ignoring everything after the '/' in the line
                     pos = line.index('/')
                     line = line[:pos]
                 terms = line
@@ -168,8 +168,7 @@ class TextFile:
 
         for key in doc_terms.keys():    ## mapping each MESH term present in the case reports to a UI
             doc_UI[key] = set()
-            value = doc_terms[key]
-            for i in value:
+            for i in doc_terms[key]:
                 if i in mesh_id_mapping:
                     doc_UI[key].add(mesh_id_mapping[i])
 
@@ -187,10 +186,10 @@ class TextFile:
             line = line.replace('*','')
             line = line.replace('.','')
             line = nltk.word_tokenize(line)
-            if 'PMID-' in line:
+            if 'PMID-' in line: ## take the PMID
                 pmid = line[1]
                 doc_keywords[pmid] = set()
-            elif 'OT' in line:
+            elif 'OT' in line:  ## take the terms in OT
                 line = ' '.join(line[2:])
                 line = line.lower()
                 if ('(' in line and '/' in line): ## ignoring everything after '(' or '/', whichever one comes first if both are in the same line
@@ -209,7 +208,7 @@ class TextFile:
                 else:   ## this means line contains neither '(' nor '/' so take the entire line
                     ts = line
 
-                if "'" in ts:
+                if "'" in ts:   ## removing apostrophe from the term
                     pos = ts.index("'")
                     ts = ts[:pos] + ts[(pos+2):]
                     ts = ' '.join(ts.split())
@@ -228,7 +227,7 @@ class TextFile:
                        "OAB-","OWN-","PG-","PL-","PMC-","PMID-","PST-","PUBM-","RF-","SB-","SO-","STAT-","TA-","TI-","TT-","VI-","YR-")
         
         doc_titles = {}
-        index = 0; start = 0; 
+        index = 0; start = 0
         
         text = self.text.splitlines()
         while index != len(text):   ## take the terms in front of the 'TI' or 'TI-' field and put that in a dict with 'PMID' as key 
@@ -249,14 +248,14 @@ class TextFile:
                         temp += line
                     else:
                         start = 0
-                        temp = [ch for ch in temp if len(ch) > 2]
-                        temp = [ch for ch in temp if ch not in string.punctuation]
+                        temp = [ch for ch in temp if len(ch) > 2]   ## take words in title that are longer than 2 characters
+                        temp = [ch for ch in temp if ch not in string.punctuation]  ## remove punctuation from title
                         temp = " ".join(temp).lower()
                         doc_titles[pmid] = temp
                         temp = ""
             index += 1
 
-        for key in doc_titles.copy():   ## removing words in title that are either punctuation or less than 3 characters long
+        for key in doc_titles.copy():
             title = []; title.append(doc_titles[key])
             cv = sklearn.feature_extraction.text.CountVectorizer(stop_words='english',strip_accents='unicode', analyzer='word',ngram_range=(1,6))   ## get the ngrams for the titles
             cv.fit(title)    ## getting ngrams is important because various subphrases of the title can match with description of ICD10 codes
