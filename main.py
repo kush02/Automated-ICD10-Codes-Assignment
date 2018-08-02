@@ -1,6 +1,3 @@
-"""
-    Script to find the similarity between query and database. Also aims to do topic modelling and predict missing features in new, unseen documents
-"""
 import sys
 sys.dont_write_bytecode = True
 
