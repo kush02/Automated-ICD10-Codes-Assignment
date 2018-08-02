@@ -119,13 +119,13 @@ def main():
 
     ##### Testing MESH class
     mv = MESH('MESH Terms.txt','')
-    mv.create_MESH_vocab_and_IDmapping(); mv.save_MESH_IDmapping('MESH ID Mapping.txt')
+    #mv.create_MESH_vocab_and_IDmapping(); mv.save_MESH_IDmapping('MESH ID Mapping.txt')
     mesh_id_mapping = mv.read_MESH_IDmapping('MESH ID Mapping.txt')
     
     ##### Testing Corpus class
-    folder = "corpus/"
-    num = 100
-    corp = Corpus(folder,n=num)
+    #folder = "corpus/"
+    #num = 100
+    #corp = Corpus(folder,n=num)
     
     ##### Vectorizing
     #tf_vectorizer, tf_matrix = corp.vectorize_corpus(corp.clean(),voc)
