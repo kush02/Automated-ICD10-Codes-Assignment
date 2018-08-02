@@ -3,7 +3,7 @@ sys.dont_write_bytecode = True
 
 import nltk, string, sklearn
 
-class TextFile:
+class TextFile: #hi
     
     def __init__(self,name,folder,encode='utf8'):
         """
