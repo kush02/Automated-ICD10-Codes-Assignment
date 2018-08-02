@@ -62,36 +62,33 @@ class MESH(Base):
         self.mapping_size = 0
 
 
-    def create_MESH_vocab_and_IDmapping(self):
+    def create_MESH_vocab_and_IDmapping(self,tree_nodes=('A','B','C')):
         """
         Create MESH vocabulary from text file. Stores vocab into member variable 'vocab'.
         """
         temp = 0; added_mesh = 0; start = 0
-        tree_nodes = ('A','B','C')
-        
+                
         for line in self.text.splitlines(): ## take the terms in the line containing 'MH' and put them in a list
             line = nltk.word_tokenize(line)
-            if 'RECTYPE' in line:
+            if 'RECTYPE' in line:   ## this indicates the start of a new case report
                 start = 1
             if start == 1:
-                if 'MH' in line:
+                if 'MH' in line:    ## take MeSH term for vocab
                     temp = ' '.join(line[2:])
                     temp = temp.lower()
                 if 'MN' in line:
-                    if added_mesh == 0 and line[2][0] in tree_nodes:
+                    if added_mesh == 0 and line[2][0] in tree_nodes:    ## see if MeSH term is part of the tree node that we care about
                         self.vocab.append(temp)
                         added_mesh = 1
-            if 'UI' in line:
+            if 'UI' in line:    ## this indicates the end of the case report. Take UI of the MeSH term for MeSH ID mapping
                 start = 0
                 mesh_id = line[2]
                 if added_mesh == 1:
                     self.mapping[temp] = mesh_id
                 added_mesh = 0
                 temp = 0                
-            
-        #vocab = self.lemmatize(vocab)
-        #self.vocab = list(set(self.vocab))    ## make sure the vocab has no duplicates
-        self.vocab_size = len(self.vocab)
+    
+        self.vocab_size = len(self.vocab)   ## len of vocab and mapping should be the same because both contain the same number of terms
         self.mapping_size = len(self.mapping)
 
         return
@@ -99,7 +96,7 @@ class MESH(Base):
 
     def save_MESH_vocab(self,name):
         """
-            Saving the MESH vocab into a text file. Returns void.
+            Saving the MESH vocab into a text file.
         """
         with open(name, 'wb') as f:
             pickle.dump(self.vocab, f)
@@ -121,7 +118,7 @@ class MESH(Base):
 
     def save_MESH_IDmapping(self,name):
         """
-            Saving the MESH vocab into a text file. Returns void.
+            Saving the MESH vocab into a text file.
         """
         with open(name, 'wb') as f:
             pickle.dump(self.mapping, f)
