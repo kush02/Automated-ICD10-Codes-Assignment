@@ -1,8 +1,7 @@
 import sys
 sys.dont_write_bytecode = True
 
-import nltk, itertools, collections, string, sklearn
-import numpy as np
+import nltk, collections, string
 import matplotlib.pyplot as plt
 import pandas as pd
 import pymysql as sql
@@ -12,7 +11,7 @@ class Assigner:
 
     def __init__(self,mesh_to_icd10_mapping,mesh_id_mapping):
         """
-            Takes in the mesh_to_icd10_mapping.
+            Takes in the mesh_to_icd10_mapping. Creates inverse mapping from MeSH terms to their respective UIs
         """
         self.mesh_to_icd10_mapping = pd.read_csv(mesh_to_icd10_mapping)
         self.mesh_id_mapping = mesh_id_mapping
@@ -31,9 +30,9 @@ class Assigner:
         for key in ui.keys():   ## taking the UI of each MESH term present in the case reports and finding the corresponding ICD10 codes in the mapping file
             self.no_MESHterms_codes_per_report[key] = set()
             for i in ui[key]:
-                if i in df['MESH_ID'].values:
+                if i in df['MESH_ID'].values:   ## check if UI is in the mapping file
                     mesh_terms_ICD10[key] = set(df[df['MESH_ID']==i]['ICD10CM_CODE'].values.tolist())
-                else:
+                else:   ## if UI is not mapping file, add it to a list containing all the missing UIs. Also add UI to a dict that contains all the missing UIs for each case report
                     self.no_MESHterms_codes_per_report[key].add(i)
                     self.no_MESHterms_codes.append(i)
     
@@ -53,8 +52,8 @@ class Assigner:
             keyword_ICD10[key] = set()
             for i in keywords[key]:
                 cur.execute("select * from mrconso where sab='ICD10CM' and str='%s';" % i)
-                for row in cur.fetchall():
-                    keyword_ICD10[key].add(marker+row[13])
+                for row in cur.fetchall():  ## go through the SQL table
+                    keyword_ICD10[key].add(marker+row[13])  ## ICD10 code is in row[13]
         
         conn.close()
 
@@ -65,7 +64,7 @@ class Assigner:
         """
             Assigns ICD10 codes to titles of each document. Returns a dictionary. Codes have a '^' attached to them.
         """
-        titles_ICD10 = self.assign_keywords_ICD10(titles,marker=marker)
+        titles_ICD10 = self.assign_keywords_ICD10(titles,marker=marker) ## the marker for titles is different than that of keywords
 
         return titles_ICD10
 
@@ -79,29 +78,29 @@ class Assigner:
         words = []
         
         for UI in UIs:
-            term = self.inverse_mapping[UI]
+            term = self.inverse_mapping[UI] ## get term corresponding to the UI
             for t in nltk.word_tokenize(term):
-                if (t not in string.punctuation and t.isdigit() != True):
+                if (t not in string.punctuation and t.isdigit() != True):   ## clean term of punctations and non-alpha characters
                     t = lemmer.lemmatize(t)
                     words.append(t)
 
         stopword_list = {}
-        c = collections.Counter(words)
+        c = collections.Counter(words)  ## counts of each term
         
-        stopword_list = {key: c[key]/float(len(words)) for key in c.keys()}
+        stopword_list = {key: c[key]/float(len(words)) for key in c.keys()} ## populate stopword_list with term frequency
         
         return stopword_list
         
 
-    def assign_MESHterms_partial_match_single_codes(self,num_rows=100,marker="~"):
+    def assign_MESHterms_partial_match_single_codes(self,n_least_common=2,num_rows=100,marker="~"):
         """
-
+            Assigns ICD10 codes based on partial matches of MeSH terms that could not be found in the mapping file. Returns a dict.
         """
         conn = sql.connect(host="localhost",user="root",passwd="pass",db="umls")    ## connecting to the MySQL server to run queries
         cur = conn.cursor()
 
         stopword_list = self.create_stopword_list()
-        stopword_list_threshold = collections.Counter(list(stopword_list.values())).most_common()[1][0] ## using the tf of second least common words as threshold
+        stopword_list_threshold = collections.Counter(list(stopword_list.values())).most_common()[n_least_common-1][0] ## using the term frequency of nth least common words as threshold
                 
         UIs = set(self.no_MESHterms_codes)
         lemmer = nltk.stem.wordnet.WordNetLemmatizer()
@@ -109,9 +108,9 @@ class Assigner:
         
         for UI in UIs:
             codes = []
-            term = self.inverse_mapping[UI]
+            term = self.inverse_mapping[UI] ## get term for the corresponding UI
             
-            if ',' in term:
+            if ',' in term: ## formatting the term to match the formatting of other terms that do not contain punctuation
                 term = term.split(',')
                 term = term[::-1]
                 term = ' '.join(term)
@@ -121,19 +120,19 @@ class Assigner:
             for i in range(term_len):
                 term[i] = lemmer.lemmatize(term[i])
                 try:
-                    if stopword_list[term[i]] <= stopword_list_threshold:
+                    if stopword_list[term[i]] <= stopword_list_threshold:   ## keep the words that have term frequency less than or equal to the threshold
                         term.append(term[i])
-                except KeyError:
+                except KeyError:    ## if word not in keys, skip it. Used to detect all the non-alpha deleted from stopword_list
                     continue                        
             term = term[term_len:]
 
             term_len = len(term)
             if term_len > 0:
-                if term_len == 2:   ## checking if two partial string matches gets singular codes
+                if term_len == 2:   ## checking for two partial string matches
                     cur.execute("select * from mrconso where sab='ICD10CM' and str like '%%%s%%' and str like '%%%s%%';" %(term[0], term[1]))
                     results = cur.fetchall()
                     term = ' '.join(term)
-                elif term_len == 3: ## checking if three partial string matches gets singular codes
+                elif term_len == 3: ## checking for three partial string matches 
                     cur.execute("select * from mrconso where sab='ICD10CM' and str like '%%%s%%' and str like '%%%s%%' and str like '%%%s%%';" %(term[0], term[1], term[2]))
                     results = cur.fetchall()
                     term = ' '.join(term)
@@ -142,26 +141,24 @@ class Assigner:
                     cur.execute("select * from mrconso where sab='ICD10CM' and str like '%%%s%%';" % term)
                     results = cur.fetchall()
                 
-            if len(results) < num_rows and len(results) > 0:
+            if len(results) < num_rows and len(results) > 0:    ## only go through results if they are under 100 rows in length
                 for row in results:
                     if term_len > 1:
                         codes.append(marker + row[13])
                     else:
-                        tokens = nltk.word_tokenize(row[14].lower())
-                        if term in tokens:
+                        tokens = nltk.word_tokenize(row[14].lower())    ## tokenize the string description for the code
+                        if term in tokens:  ## check if the term appears independently (not as a substring) in the string
                             codes.append(marker + row[13])
                          
             for key in self.no_MESHterms_codes_per_report.keys():
                 single_codes[key] = set()
-                if UI in self.no_MESHterms_codes_per_report[key]:
-                    if len(set(codes)) == 1:
+                if UI in self.no_MESHterms_codes_per_report[key]:   ##  check if UI appears in a case report
+                    if len(set(codes)) == 1:    ## if all the codes are the same, then only one code exists for the UI. Achieved precision. Same code.
                         single_codes[key] = set(codes)
-                        #print("same code",term, codes)
                     else:
                         codes = [code.split('.')[0] for code in codes]
-                        if len(set(codes)) == 1:
+                        if len(set(codes)) == 1:    ## this means the all the codes share the same tree node for the UI. Achieved generality. Same tree node.
                             single_codes[key] = set(codes)
-                            #print("same tree node",term, codes)
                             
         conn.close()
         
@@ -170,7 +167,7 @@ class Assigner:
 
     def assign_all_ICD10(self,ui,keywords,titles):
         """
-
+            Assigns all possible codes for a case report. Returns a dict.
         """
         mesh_codes = self.assign_MESHterms_ICD10(ui)
         keywords_codes = self.assign_keywords_ICD10(keywords)
