@@ -4,7 +4,7 @@
 import sys
 sys.dont_write_bytecode = True
 
-import nltk, string, sklearn, os, time, scipy, time
+import nltk, string, sklearn, os, time, scipy
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -119,9 +119,8 @@ def main():
 
     ##### Testing MESH class
     mv = MESH('MESH Terms.txt','')
-    #mv.create_MESH_vocab_and_IDmapping(); mv.save_MESH_IDmapping('MESH ID Mapping.txt')
+    mv.create_MESH_vocab_and_IDmapping(); mv.save_MESH_IDmapping('MESH ID Mapping.txt')
     mesh_id_mapping = mv.read_MESH_IDmapping('MESH ID Mapping.txt')
-    #print(mesh_id_mapping['adult'])
     
     ##### Testing Corpus class
     folder = "corpus/"
@@ -144,8 +143,7 @@ def main():
     #mesh_codes = asg.assign_MESHterms_ICD10(ui)
     #keywords_codes = asg.assign_keywords_ICD10(keywords)
     #titles_codes = asg.assign_titles_ICD10(titles)
-    #asg.create_stopword_list()
-    #asg.assign_MESHterms_partial_match_single_codes()
+    #partial_codes = asg.assign_MESHterms_partial_match_single_codes()
     tot = asg.assign_all_ICD10(ui,keywords,titles)
     #asg.write_codes_to_csv(tot,'test.csv')  # Case Reports_ICD10_Mapping.csv
 
