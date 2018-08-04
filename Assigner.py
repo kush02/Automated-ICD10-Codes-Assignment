@@ -35,7 +35,7 @@ class Assigner:
                 else:   ## if UI is not mapping file, add it to a list containing all the missing UIs. Also add UI to a dict that contains all the missing UIs for each case report
                     self.no_MESHterms_codes_per_report[key].add(i)
                     self.no_MESHterms_codes.append(i)
-    
+        
         return mesh_terms_ICD10
 
 
@@ -80,7 +80,7 @@ class Assigner:
         for UI in UIs:
             term = self.inverse_mapping[UI] ## get term corresponding to the UI
             for t in nltk.word_tokenize(term):
-                if (t not in string.punctuation and t.isdigit() != True):   ## clean term of punctations and non-alpha characters
+                if (t not in string.punctuation and t.isdigit() != True and len(t) > 1):   ## clean term of punctations and non-alpha characters
                     t = lemmer.lemmatize(t)
                     words.append(t)
 
@@ -92,20 +92,31 @@ class Assigner:
         return stopword_list
         
 
-    def assign_MESHterms_partial_match_single_codes(self,n_least_common=2,num_rows=100,marker="~"):
+    def assign_MESHterms_partial_match_single_codes(self,create_stopword=True,stopword_percent_include=0.8,num_rows=100,marker="~"):
         """
             Assigns ICD10 codes based on partial matches of MeSH terms that could not be found in the mapping file. Returns a dict.
         """
+        if not create_stopword:
+            return
+        
         conn = sql.connect(host="localhost",user="root",passwd="pass",db="umls")    ## connecting to the MySQL server to run queries
         cur = conn.cursor()
 
         stopword_list = self.create_stopword_list()
-        stopword_list_threshold = collections.Counter(list(stopword_list.values())).most_common()[n_least_common-1][0] ## using the term frequency of nth least common words as threshold
-                
+        c = collections.Counter(list(stopword_list.values())).most_common()
+        count = 0; percent = 0; index = 0
+        for n,item in enumerate(c):
+            count += item[1]
+            percent = count/float(len(stopword_list))
+            if percent <= stopword_percent_include:
+                index = n
+            else:
+                break
+        stopword_list_threshold = collections.Counter(list(stopword_list.values())).most_common()[index][0] ## using the term frequency as threshold
         UIs = set(self.no_MESHterms_codes)
         lemmer = nltk.stem.wordnet.WordNetLemmatizer()
+
         single_codes = {}
-        
         for UI in UIs:
             codes = []
             term = self.inverse_mapping[UI] ## get term for the corresponding UI
@@ -126,7 +137,7 @@ class Assigner:
                     continue                        
             term = term[term_len:]
 
-            term_len = len(term)
+            term_len = len(term); results = []
             if term_len > 0:
                 if term_len == 2:   ## checking for two partial string matches
                     cur.execute("select * from mrconso where sab='ICD10CM' and str like '%%%s%%' and str like '%%%s%%';" %(term[0], term[1]))
@@ -149,9 +160,8 @@ class Assigner:
                         tokens = nltk.word_tokenize(row[14].lower())    ## tokenize the string description for the code
                         if term in tokens:  ## check if the term appears independently (not as a substring) in the string
                             codes.append(marker + row[13])
-                         
+
             for key in self.no_MESHterms_codes_per_report.keys():
-                single_codes[key] = set()
                 if UI in self.no_MESHterms_codes_per_report[key]:   ##  check if UI appears in a case report
                     if len(set(codes)) == 1:    ## if all the codes are the same, then only one code exists for the UI. Achieved precision. Same code.
                         single_codes[key] = set(codes)
@@ -159,24 +169,25 @@ class Assigner:
                         codes = [code.split('.')[0] for code in codes]
                         if len(set(codes)) == 1:    ## this means the all the codes share the same tree node for the UI. Achieved generality. Same tree node.
                             single_codes[key] = set(codes)
-                            
+
         conn.close()
         
         return single_codes
 
 
-    def assign_all_ICD10(self,ui,keywords,titles):
+    def assign_all_ICD10(self,ui,keywords,titles,partial_match=True,create_stopword=True,stopword_percent_include=0.8):
         """
             Assigns all possible codes for a case report. Returns a dict.
         """
         mesh_codes = self.assign_MESHterms_ICD10(ui)
         keywords_codes = self.assign_keywords_ICD10(keywords)
         titles_codes = self.assign_titles_ICD10(titles)
-        mesh_partial_match_codes = self.assign_MESHterms_partial_match_single_codes()
+        if partial_match:
+            mesh_partial_match_codes = self.assign_MESHterms_partial_match_single_codes(create_stopword=create_stopword,stopword_percent_include=stopword_percent_include)
 
         a = self.join_codes(mesh_codes,keywords_codes)
         b = self.join_codes(a,titles_codes)
-        c = self.join_codes(b,mesh_partial_match_codes)
+        c = self.join_codes(b,mesh_partial_match_codes)            
 
         return c
         
@@ -188,7 +199,11 @@ class Assigner:
         joint_dict = {}
         
         for key in x.keys():
-            joint_dict[key] = x[key].union(y[key])
+            try:
+                joint_dict[key] = x[key].union(y[key])
+            except KeyError:
+                y[key] = set()
+                joint_dict[key] = x[key].union(y[key])
             
         return joint_dict
 
