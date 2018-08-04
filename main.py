@@ -1,7 +1,7 @@
 import sys
 sys.dont_write_bytecode = True
 
-import nltk, string, sklearn, os, time, scipy
+import nltk, string, sklearn, os, time, scipy, collections
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -129,10 +129,10 @@ def main():
     #tv = q.transform_query(tf_vectorizer).flatten()
 
     ##### Getting data
-    tf = TextFile('Medical Case Reports.txt','',encode='latin-1')
+    tf = TextFile('Medical Case Reports.txt','',encode='latin-1') 
     mesh_terms = tf.get_MESH_terms()
     ui = tf.get_UI(mesh_id_mapping)
-    keywords = tf.get_keywords()
+    keywords = tf.get_keywords()    
     titles = tf.get_titles()
 
     ##### Assigning ICD10 codes
@@ -140,9 +140,34 @@ def main():
     #mesh_codes = asg.assign_MESHterms_ICD10(ui)
     #keywords_codes = asg.assign_keywords_ICD10(keywords)
     #titles_codes = asg.assign_titles_ICD10(titles)
-    #partial_codes = asg.assign_MESHterms_partial_match_single_codes()
-    tot = asg.assign_all_ICD10(ui,keywords,titles)
-    #asg.write_codes_to_csv(tot,'test.csv')  # Case Reports_ICD10_Mapping.csv
+    #partial_codes = asg.assign_MESHterms_partial_match_single_codes(stopword_percent_include=0.92)
+    tot = asg.assign_all_ICD10(ui,keywords,titles,stopword_percent_include=0.9);print(tot)
+    #asg.write_codes_to_csv(tot,'all_codes.csv')  # Case Reports_ICD10_Mapping.csv
+
+    ##### Comparing with labelled dataset
+    import csv
+    labelled_dataset = {}
+    count = 0
+    with open('ACCR_RMD_ICD10.tsv') as tsvfile:
+        reader = csv.DictReader(tsvfile, dialect='excel-tab')
+        for row in reader:
+            for key in row.keys():
+                if key == 'PMID':
+                    pmid = row[key]
+                    labelled_dataset[pmid] = set()
+                elif key == 'disease':
+                    continue
+                else:
+                    if row[key] == '1':
+                        labelled_dataset[pmid].add(key)
+                        count = count + 1
+    overlap = {}
+    #for key in tot.keys():
+     #   intersect = set.intersection(tot[key],labelled_dataset[key])
+      #  overlap[key] = (intersect,len(intersect)*100.0/float(len(tot[key])),len(intersect)*100.0/float(len(labelled_dataset[key])))#tuple = (common codes(CC),coverage of CC in tot, coverage of CC in labelled_dataset)
+    #print(overlap)
+    #asg.write_codes_to_csv(overlap,'overlapping_codes.csv')
+    #print(tot['722440'],labelled_dataset['722440'])
 
     print(time.time()-start)
     """
