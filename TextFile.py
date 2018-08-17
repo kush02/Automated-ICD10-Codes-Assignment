@@ -217,7 +217,7 @@ class TextFile:
         return doc_keywords
 
 
-    def get_titles(self):
+    def get_titles(self,ngrams=(1,6)):
         """
             Get the 'TI' field from Medical Case Reports. Returns a dictionary.
         """
@@ -256,11 +256,10 @@ class TextFile:
             index += 1
 
         for key in doc_titles.copy():
-            title = []; title.append(doc_titles[key])
-            cv = sklearn.feature_extraction.text.CountVectorizer(stop_words='english',strip_accents='unicode', analyzer='word',ngram_range=(1,6))   ## get the ngrams for the titles
-            cv.fit(title)    ## getting ngrams is important because various subphrases of the title can match with description of ICD10 codes
+            cv = sklearn.feature_extraction.text.CountVectorizer(stop_words='english',strip_accents='unicode', analyzer='word',token_pattern='(?u)\\b[\\w-]+\\b',ngram_range=ngrams)   ## get the ngrams for the titles
+            cv.fit([doc_titles[key]])    ## getting ngrams is important because various subphrases of the title can match with description of ICD10 codes
             doc_titles[key] = cv.get_feature_names()    ## put the ngrams into a dict with 'PMID' as key
-            
+        
         return doc_titles
 
 
