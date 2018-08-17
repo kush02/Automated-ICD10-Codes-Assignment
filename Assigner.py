@@ -1,7 +1,7 @@
 import sys
 sys.dont_write_bytecode = True
 
-import nltk, collections, string
+import nltk, collections, string, sklearn, itertools
 import matplotlib.pyplot as plt
 import pandas as pd
 import pymysql as sql
@@ -11,12 +11,13 @@ class Assigner:
 
     def __init__(self,mesh_to_icd10_mapping,mesh_id_mapping):
         """
-            Takes in the mesh_to_icd10_mapping. Creates inverse mapping from MeSH terms to their respective UIs
+            Takes in the mesh_to_icd10_mapping. Creates inverse mapping from UIs to their respective MeSH terms
         """
         self.mesh_to_icd10_mapping = pd.read_csv(mesh_to_icd10_mapping)
         self.mesh_id_mapping = mesh_id_mapping
         self.inverse_mapping = dict((v, k) for k, v in self.mesh_id_mapping.items())
         self.no_MESHterms_codes_per_report = {}
+        self.unassigned_MESHterms_per_report = {}
         self.no_MESHterms_codes = []
 
 
@@ -25,17 +26,22 @@ class Assigner:
             Assign ICD10 codes to each document based on the MESH IDs present in the document. Returns a dict.
         """
         df = self.mesh_to_icd10_mapping
+        count = 0
         mesh_terms_ICD10 = {}
         
         for key in ui.keys():   ## taking the UI of each MESH term present in the case reports and finding the corresponding ICD10 codes in the mapping file
             self.no_MESHterms_codes_per_report[key] = set()
+            self.unassigned_MESHterms_per_report[key] = set()
+            mesh_terms_ICD10[key] = set()
             for i in ui[key]:
                 if i in df['MESH_ID'].values:   ## check if UI is in the mapping file
-                    mesh_terms_ICD10[key] = set(df[df['MESH_ID']==i]['ICD10CM_CODE'].values.tolist())
+                    mesh_terms_ICD10[key].add(j for j in df[df['MESH_ID']==i]['ICD10CM_CODE'].values.tolist())
                 else:   ## if UI is not mapping file, add it to a list containing all the missing UIs. Also add UI to a dict that contains all the missing UIs for each case report
                     self.no_MESHterms_codes_per_report[key].add(i)
+                    self.unassigned_MESHterms_per_report[key].add(self.inverse_mapping[i])
                     self.no_MESHterms_codes.append(i)
-        
+
+        #print(self.unassigned_MESHterms_per_report) 
         return mesh_terms_ICD10
 
 
@@ -51,12 +57,12 @@ class Assigner:
         for key in keywords.keys(): ## find ICD10 codes for keywords
             keyword_ICD10[key] = set()
             for i in keywords[key]:
-                cur.execute("select * from mrconso where sab='ICD10CM' and str='%s';" % i)
+                cur.execute("select distinct(code) from mrconso where sab='ICD10CM' and tty!='AB' and str='%s';" % i)
                 for row in cur.fetchall():  ## go through the SQL table
-                    keyword_ICD10[key].add(marker+row[13])  ## ICD10 code is in row[13]
+                    keyword_ICD10[key].add(row[0])  ## ICD10 code is in row[13]
         
         conn.close()
-
+        
         return keyword_ICD10
 
 
@@ -69,7 +75,7 @@ class Assigner:
         return titles_ICD10
 
 
-    def create_stopword_list(self):
+    def create_stopword_list(self,stopword_percent_include):
         """
             Calculating the term frequency of a word in each term. Returns a dict.
         """
@@ -80,7 +86,7 @@ class Assigner:
         for UI in UIs:
             term = self.inverse_mapping[UI] ## get term corresponding to the UI
             for t in nltk.word_tokenize(term):
-                if (t not in string.punctuation and t.isdigit() != True and len(t) > 1):   ## clean term of punctations and non-alpha characters
+                if t not in string.punctuation:   ## clean punctations, non-alpha characters
                     t = lemmer.lemmatize(t)
                     words.append(t)
 
@@ -88,9 +94,151 @@ class Assigner:
         c = collections.Counter(words)  ## counts of each term
         
         stopword_list = {key: c[key]/float(len(words)) for key in c.keys()} ## populate stopword_list with term frequency
+        c1 = collections.Counter(list(stopword_list.values())).most_common()
+        count = 0; percent = 0; index = 0
+        for n,item in enumerate(c1):
+            count += item[1]
+            percent = count/float(len(stopword_list))
+            if percent <= stopword_percent_include:
+                index = n
+            else:
+                break
+        stopword_threshold = collections.Counter(list(stopword_list.values())).most_common()[index][0] ## using the term frequency as threshold
         
-        return stopword_list
+        return stopword_list,stopword_threshold
+
+
+    def assign_context_aware_codes(self,stopword_percent_include=0.8):
+        """
+
+        """
+        conn = sql.connect(host="localhost",user="root",passwd="pass",db="umls")    ## connecting to the MySQL server to run queries
+        cur = conn.cursor()
+
+        stopword_list,stopword_threshold = self.create_stopword_list(stopword_percent_include)
+        eng_stopwords = set(nltk.corpus.stopwords.words('english'))
         
+        lemmer = nltk.stem.wordnet.WordNetLemmatizer()
+        context_aware_codes = {}
+        count = 0;
+        for key in self.unassigned_MESHterms_per_report.keys():
+            context_aware_codes[key] = set()
+            if count == 0:
+                count += 1
+                continue
+
+            all_codes = set()
+            terms = set([lemmer.lemmatize(j) for i in self.unassigned_MESHterms_per_report[key] for j in i.split()])
+            #print(self.unassigned_MESHterms_per_report[key])
+            for val in self.unassigned_MESHterms_per_report[key]:
+                print(val)
+                codes = []; codes_dict = {}
+                val = nltk.word_tokenize(val)
+                val = [lemmer.lemmatize(i) for i in val if i not in string.punctuation]
+                val_save = val; val_len = len(val)
+                val = [i for i in val if stopword_list[i] <= stopword_threshold]
+                print(val)
+                if len(val) == 1:
+                    cur.execute("select distinct(code),str from mrconso where sab='ICD10CM' and tty!='AB' and str like '%%%s%%';" % val[0])
+                elif len(val) == 2:
+                    cur.execute("select distinct(code),str from mrconso where sab='ICD10CM' and tty!='AB' and str like '%%%s%%' and str like '%%%s%%';" % (val[0],val[1]))
+                elif len(val) == 3:
+                    cur.execute("select distinct(code),str from mrconso where sab='ICD10CM' and tty!='AB' and str like '%%%s%%' and str like '%%%s%%' and str like '%%%s%%';"
+                                % (val[0],val[1],val[2]))
+                elif len(val) == 4:
+                    cur.execute("select distinct(code),str from mrconso where sab='ICD10CM' and tty!='AB' and str like '%%%s%%' and str like '%%%s%%' and str like '%%%s%%' and str like '%%%s%%';"
+                                % (val[0],val[1],val[2],val[3]))
+                elif len(val) == 5:
+                    cur.execute("select distinct(code),str from mrconso where sab='ICD10CM' and tty!='AB' and str like '%%%s%%' and str like '%%%s%%' and str like '%%%s%%' and str like '%%%s%%' and str like '%%%s%%';"
+                                % (val[0],val[1],val[2],val[3],val[4]))
+                elif val_len == 2 and len(val) == 0:    ## if term only contains stopwords, then run the entire term through a partial match so as to not skip whole terms
+                    cur.execute("select distinct(code),str from mrconso where sab='ICD10CM' and tty!='AB' and str like '%%%s%%' and str like '%%%s%%';" % (val_save[0],val_save[1]))
+                elif val_len == 3 and len(val) == 0:
+                    cur.execute("select distinct(code),str from mrconso where sab='ICD10CM' and tty!='AB' and str like '%%%s%%' and str like '%%%s%%' and str like '%%%s%%';" % (val_save[0],val_save[1],val_save[2]))
+                elif val_len == 4 and len(val) == 0:
+                    cur.execute("select distinct(code),str from mrconso where sab='ICD10CM' and tty!='AB' and str like '%%%s%%' and str like '%%%s%%' and str like '%%%s%%' and str like '%%%s%%';"
+                                % (val_save[0],val_save[1],val_save[2],val_save[3]))
+                elif val_len == 5 and len(val) == 0:
+                    cur.execute("select distinct(code),str from mrconso where sab='ICD10CM' and tty!='AB' and str like '%%%s%%' and str like '%%%s%%' and str like '%%%s%%' and str like '%%%s%%' and str like '%%%s%%';"
+                                % (val_save[0],val_save[1],val_save[2],val_save[3],val_save[4]))
+                else:
+                    continue
+                    
+                for row in cur.fetchall():
+                    descrp = set([lemmer.lemmatize(k.lower()) for k in nltk.word_tokenize(row[1]) if k not in string.punctuation and k not in eng_stopwords])
+                    num = float(len(set.intersection(terms,descrp)))
+                    den = float(len(set.union(set(val),descrp)))
+                    jaccard_score = num/den
+                    if jaccard_score != 0.0:
+                        codes.append((row[0],jaccard_score))
+                        
+                for code in codes:
+                    node = code[0].split('.')[0]
+                    try:
+                        if codes_dict[node][1] < code[1]:
+                            codes_dict[node] = code
+                        elif codes_dict[node][1] == code[1]:
+                            if len(codes_dict[node][0]) > len(code[0]):   ## For same node, pick the more general code(which is always shorter in length)
+                                codes_dict[node] = code
+                    except KeyError:
+                        codes_dict[node] = code
+
+                if codes_dict:
+                    all_codes.add(codes_dict.values())
+                    print(all_codes)
+
+            context_aware_codes[key] = all_codes
+            break
+        #print(context_aware_codes)
+        conn.close()
+        
+        return context_aware_codes
+        
+
+    def assign_all_ICD10(self,ui,keywords,titles,partial_match=True,create_stopword=True,stopword_percent_include=0.8):
+        """
+            Assigns all possible codes for a case report. Returns a dict.
+        """
+        mesh_codes = self.assign_MESHterms_ICD10(ui)
+        keywords_codes = self.assign_keywords_ICD10(keywords)
+        titles_codes = self.assign_titles_ICD10(titles)
+        mesh_partial_match_codes = {}
+        if partial_match:
+            mesh_partial_match_codes = self.assign_MESHterms_partial_match_single_codes(create_stopword=create_stopword,stopword_percent_include=stopword_percent_include)
+
+        a = self.join_codes(mesh_codes,keywords_codes)
+        b = self.join_codes(a,titles_codes)
+        c = self.join_codes(b,mesh_partial_match_codes)            
+
+        return c
+        
+
+    def join_codes(self,x,y):
+        """
+            Join ICD10 codes from two dictionaries into one dictionary. Returns a dictionary.
+        """
+        joint_dict = {}
+        
+        for key in x.keys():
+            try:
+                joint_dict[key] = x[key].union(y[key])
+            except KeyError:
+                y[key] = set()
+                joint_dict[key] = x[key].union(y[key])
+            
+        return joint_dict
+
+
+    def write_codes_to_csv(self,codes,name):
+        """
+            Puts a dictionary of codes into a csv file.
+        """
+        df = pd.DataFrame.from_dict(codes,orient='index').transpose()
+        df.to_csv(name,index=False)
+
+        return 
+
+################################################################################################################################################################################
 
     def assign_MESHterms_partial_match_single_codes(self,create_stopword=True,stopword_percent_include=0.8,num_rows=100,marker="~"):
         """
@@ -102,21 +250,15 @@ class Assigner:
         conn = sql.connect(host="localhost",user="root",passwd="pass",db="umls")    ## connecting to the MySQL server to run queries
         cur = conn.cursor()
 
-        stopword_list = self.create_stopword_list()
-        c = collections.Counter(list(stopword_list.values())).most_common()
-        count = 0; percent = 0; index = 0
-        for n,item in enumerate(c):
-            count += item[1]
-            percent = count/float(len(stopword_list))
-            if percent <= stopword_percent_include:
-                index = n
-            else:
-                break
-        stopword_list_threshold = collections.Counter(list(stopword_list.values())).most_common()[index][0] ## using the term frequency as threshold
+        stopword_list,stopword_threshold = self.create_stopword_list(stopword_percent_include)
+
         UIs = set(self.no_MESHterms_codes)
         lemmer = nltk.stem.wordnet.WordNetLemmatizer()
 
         single_codes = {}
+        for k in self.no_MESHterms_codes_per_report.keys():
+                single_codes[k] = set()
+                
         for UI in UIs:
             codes = []
             term = self.inverse_mapping[UI] ## get term for the corresponding UI
@@ -155,16 +297,16 @@ class Assigner:
             if len(results) < num_rows and len(results) > 0:    ## only go through results if they are under 100 rows in length
                 for row in results:
                     if term_len > 1:
-                        codes.append(marker + row[13])
+                        codes.append(row[13])
                     else:
                         tokens = nltk.word_tokenize(row[14].lower())    ## tokenize the string description for the code
                         if term in tokens:  ## check if the term appears independently (not as a substring) in the string
-                            codes.append(marker + row[13])
+                            codes.append(row[13])
 
             for key in self.no_MESHterms_codes_per_report.keys():
                 if UI in self.no_MESHterms_codes_per_report[key]:   ##  check if UI appears in a case report
                     if len(set(codes)) == 1:    ## if all the codes are the same, then only one code exists for the UI. Achieved precision. Same code.
-                        single_codes[key] = set(codes)
+                        single_codes[key] = set(codes) 
                     else:
                         codes = [code.split('.')[0] for code in codes]
                         if len(set(codes)) == 1:    ## this means the all the codes share the same tree node for the UI. Achieved generality. Same tree node.
@@ -173,48 +315,4 @@ class Assigner:
         conn.close()
         
         return single_codes
-
-
-    def assign_all_ICD10(self,ui,keywords,titles,partial_match=True,create_stopword=True,stopword_percent_include=0.8):
-        """
-            Assigns all possible codes for a case report. Returns a dict.
-        """
-        mesh_codes = self.assign_MESHterms_ICD10(ui)
-        keywords_codes = self.assign_keywords_ICD10(keywords)
-        titles_codes = self.assign_titles_ICD10(titles)
-        if partial_match:
-            mesh_partial_match_codes = self.assign_MESHterms_partial_match_single_codes(create_stopword=create_stopword,stopword_percent_include=stopword_percent_include)
-
-        a = self.join_codes(mesh_codes,keywords_codes)
-        b = self.join_codes(a,titles_codes)
-        c = self.join_codes(b,mesh_partial_match_codes)            
-
-        return c
-        
-
-    def join_codes(self,x,y):
-        """
-            Join ICD10 codes from two dictionaries into one dictionary. Returns a dictionary.
-        """
-        joint_dict = {}
-        
-        for key in x.keys():
-            try:
-                joint_dict[key] = x[key].union(y[key])
-            except KeyError:
-                y[key] = set()
-                joint_dict[key] = x[key].union(y[key])
-            
-        return joint_dict
-
-
-    def write_codes_to_csv(self,codes,name):
-        """
-            Puts a dictionary of codes into a csv file.
-        """
-        df = pd.DataFrame.from_dict(codes,orient='index').transpose()
-        df.to_csv(name,index=False)
-
-        return 
-
 
