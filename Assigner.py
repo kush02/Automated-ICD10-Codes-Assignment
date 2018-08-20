@@ -35,7 +35,8 @@ class Assigner:
             mesh_terms_ICD10[key] = set()
             for i in ui[key]:
                 if i in df['MESH_ID'].values:   ## check if UI is in the mapping file
-                    mesh_terms_ICD10[key].add(j for j in df[df['MESH_ID']==i]['ICD10CM_CODE'].values.tolist())
+                    for j in df[df['MESH_ID']==i]['ICD10CM_CODE'].values.tolist():
+                        mesh_terms_ICD10[key].add(j)
                 else:   ## if UI is not mapping file, add it to a list containing all the missing UIs. Also add UI to a dict that contains all the missing UIs for each case report
                     self.no_MESHterms_codes_per_report[key].add(i)
                     self.unassigned_MESHterms_per_report[key].add(self.inverse_mapping[i])
@@ -120,24 +121,17 @@ class Assigner:
         
         lemmer = nltk.stem.wordnet.WordNetLemmatizer()
         context_aware_codes = {}
-        count = 0;
         for key in self.unassigned_MESHterms_per_report.keys():
-            context_aware_codes[key] = set()
-            if count == 0:
-                count += 1
-                continue
-
+            context_aware_codes[key] = set(); codes_dict = {};
             all_codes = set()
-            terms = set([lemmer.lemmatize(j) for i in self.unassigned_MESHterms_per_report[key] for j in i.split()])
+            terms = set([lemmer.lemmatize(j) for i in self.unassigned_MESHterms_per_report[key] for j in i.split() if j not in string.punctuation])
             #print(self.unassigned_MESHterms_per_report[key])
             for val in self.unassigned_MESHterms_per_report[key]:
-                print(val)
-                codes = []; codes_dict = {}
+                codes = []; more_context = []; less_context = []
                 val = nltk.word_tokenize(val)
                 val = [lemmer.lemmatize(i) for i in val if i not in string.punctuation]
                 val_save = val; val_len = len(val)
                 val = [i for i in val if stopword_list[i] <= stopword_threshold]
-                print(val)
                 if len(val) == 1:
                     cur.execute("select distinct(code),str from mrconso where sab='ICD10CM' and tty!='AB' and str like '%%%s%%';" % val[0])
                 elif len(val) == 2:
@@ -166,12 +160,20 @@ class Assigner:
                     
                 for row in cur.fetchall():
                     descrp = set([lemmer.lemmatize(k.lower()) for k in nltk.word_tokenize(row[1]) if k not in string.punctuation and k not in eng_stopwords])
-                    num = float(len(set.intersection(terms,descrp)))
-                    den = float(len(set.union(set(val),descrp)))
-                    jaccard_score = num/den
+                    intersect = set.intersection(terms,descrp)
+                    union = set.union(set(val),descrp)
+                    jaccard_score = float(len(intersect))/float(len(union))
                     if jaccard_score != 0.0:
-                        codes.append((row[0],jaccard_score))
-                        
+                        if len(val) != 0 and len(val) < val_len and len(intersect) > len(val):
+                            more_context.append((row[0],jaccard_score))
+                        else:
+                            less_context.append((row[0],jaccard_score))
+                
+                if more_context:
+                    codes = more_context
+                else:
+                    codes = less_context
+
                 for code in codes:
                     node = code[0].split('.')[0]
                     try:
@@ -183,13 +185,10 @@ class Assigner:
                     except KeyError:
                         codes_dict[node] = code
 
-                if codes_dict:
-                    all_codes.add(codes_dict.values())
-                    print(all_codes)
-
-            context_aware_codes[key] = all_codes
-            break
-        #print(context_aware_codes)
+            if codes_dict:
+                for v in codes_dict.values():
+                    context_aware_codes[key].add(v)
+        
         conn.close()
         
         return context_aware_codes
@@ -204,7 +203,7 @@ class Assigner:
         titles_codes = self.assign_titles_ICD10(titles)
         mesh_partial_match_codes = {}
         if partial_match:
-            mesh_partial_match_codes = self.assign_MESHterms_partial_match_single_codes(create_stopword=create_stopword,stopword_percent_include=stopword_percent_include)
+            mesh_partial_match_codes = self.assign_context_aware_codes(stopword_percent_include=stopword_percent_include)
 
         a = self.join_codes(mesh_codes,keywords_codes)
         b = self.join_codes(a,titles_codes)
@@ -218,13 +217,19 @@ class Assigner:
             Join ICD10 codes from two dictionaries into one dictionary. Returns a dictionary.
         """
         joint_dict = {}
-        
-        for key in x.keys():
-            try:
-                joint_dict[key] = x[key].union(y[key])
-            except KeyError:
-                y[key] = set()
-                joint_dict[key] = x[key].union(y[key])
+
+        if len(x) >= len(y):
+            for key in x.keys():
+                try:
+                    joint_dict[key] = set.union(x[key],y[key])
+                except KeyError:
+                    joint_dict[key] = x[key]
+        else:
+            for key in y.keys():
+                try:
+                    joint_dict[key] = set.union(x[key],y[key])
+                except KeyError:
+                    joint_dict[key] = y[key]
             
         return joint_dict
 
@@ -233,8 +238,8 @@ class Assigner:
         """
             Puts a dictionary of codes into a csv file.
         """
-        df = pd.DataFrame.from_dict(codes,orient='index').transpose()
-        df.to_csv(name,index=False)
+        df = pd.DataFrame.from_dict(codes,orient='index')
+        df.to_csv(name)
 
         return 
 
