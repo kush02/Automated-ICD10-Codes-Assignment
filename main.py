@@ -138,13 +138,13 @@ def main():
 
     ##### Assigning ICD10 codes
     asg = Assigner('MESH_ICD10_Mapping.csv',mesh_id_mapping)
-    mesh_codes = asg.assign_MESHterms_ICD10(ui)
-    asg.assign_context_aware_codes(stopword_percent_include=0.92)
-    #keywords_codes = asg.assign_keywords_ICD10(keywords)
-    #titles_codes = asg.assign_titles_ICD10(titles)
-    #partial_codes = asg.assign_MESHterms_partial_match_single_codes(stopword_percent_include=0.9)
-    #tot = asg.assign_all_ICD10(ui,keywords,titles,stopword_percent_include=0.9);#print(tot)
-    #asg.write_codes_to_csv(tot,'all_codes.csv')  # Case Reports_ICD10_Mapping.csv
+    #mesh_codes = asg.assign_MESHterms_ICD10(ui); #print(len(mesh_codes))
+    #keywords_codes = asg.assign_keywords_ICD10(keywords); #print(len(keywords_codes))
+    #titles_codes = asg.assign_titles_ICD10(titles); #print(len(titles_codes))
+    #partial_codes = asg.assign_context_aware_codes(stopword_percent_include=0.92); #print(len(partial_codes))
+    tot = asg.assign_all_ICD10(ui,keywords,titles,stopword_percent_include=0.92)
+    #print(tot)
+    asg.write_codes_to_csv(tot,'all_codes.csv')  # Case Reports_ICD10_Mapping.csv
 
     ##### Comparing with labelled dataset
     import csv
