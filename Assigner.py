@@ -36,7 +36,7 @@ class Assigner:
             for i in ui[key]:
                 if i in df['MESH_ID'].values:   ## check if UI is in the mapping file
                     for j in df[df['MESH_ID']==i]['ICD10CM_CODE'].values.tolist():
-                        mesh_terms_ICD10[key].add(j)
+                        mesh_terms_ICD10[key].add((j,float(1)))
                 else:   ## if UI is not mapping file, add it to a list containing all the missing UIs. Also add UI to a dict that contains all the missing UIs for each case report
                     self.no_MESHterms_codes_per_report[key].add(i)
                     self.unassigned_MESHterms_per_report[key].add(self.inverse_mapping[i])
@@ -60,7 +60,7 @@ class Assigner:
             for i in keywords[key]:
                 cur.execute("select distinct(code) from mrconso where sab='ICD10CM' and tty!='AB' and str='%s';" % i)
                 for row in cur.fetchall():  ## go through the SQL table
-                    keyword_ICD10[key].add(row[0])  ## ICD10 code is in row[13]
+                    keyword_ICD10[key].add((row[0],float(1)))  ## ICD10 code is in row[13]
         
         conn.close()
         
@@ -125,13 +125,14 @@ class Assigner:
             context_aware_codes[key] = set(); codes_dict = {};
             all_codes = set()
             terms = set([lemmer.lemmatize(j) for i in self.unassigned_MESHterms_per_report[key] for j in i.split() if j not in string.punctuation])
-            #print(self.unassigned_MESHterms_per_report[key])
+            #print(key,self.unassigned_MESHterms_per_report[key])
             for val in self.unassigned_MESHterms_per_report[key]:
                 codes = []; more_context = []; less_context = []
                 val = nltk.word_tokenize(val)
                 val = [lemmer.lemmatize(i) for i in val if i not in string.punctuation]
                 val_save = val; val_len = len(val)
-                val = [i for i in val if stopword_list[i] <= stopword_threshold]
+                val = [i for i in val if stopword_list[i] <= stopword_threshold]    ## remove stopwords
+                ##  search in UMLS database
                 if len(val) == 1:
                     cur.execute("select distinct(code),str from mrconso where sab='ICD10CM' and tty!='AB' and str like '%%%s%%';" % val[0])
                 elif len(val) == 2:
@@ -148,7 +149,8 @@ class Assigner:
                 elif val_len == 2 and len(val) == 0:    ## if term only contains stopwords, then run the entire term through a partial match so as to not skip whole terms
                     cur.execute("select distinct(code),str from mrconso where sab='ICD10CM' and tty!='AB' and str like '%%%s%%' and str like '%%%s%%';" % (val_save[0],val_save[1]))
                 elif val_len == 3 and len(val) == 0:
-                    cur.execute("select distinct(code),str from mrconso where sab='ICD10CM' and tty!='AB' and str like '%%%s%%' and str like '%%%s%%' and str like '%%%s%%';" % (val_save[0],val_save[1],val_save[2]))
+                    cur.execute("select distinct(code),str from mrconso where sab='ICD10CM' and tty!='AB' and str like '%%%s%%' and str like '%%%s%%' and str like '%%%s%%';"
+                                % (val_save[0],val_save[1],val_save[2]))
                 elif val_len == 4 and len(val) == 0:
                     cur.execute("select distinct(code),str from mrconso where sab='ICD10CM' and tty!='AB' and str like '%%%s%%' and str like '%%%s%%' and str like '%%%s%%' and str like '%%%s%%';"
                                 % (val_save[0],val_save[1],val_save[2],val_save[3]))
@@ -159,32 +161,32 @@ class Assigner:
                     continue
                     
                 for row in cur.fetchall():
-                    descrp = set([lemmer.lemmatize(k.lower()) for k in nltk.word_tokenize(row[1]) if k not in string.punctuation and k not in eng_stopwords])
-                    intersect = set.intersection(terms,descrp)
-                    union = set.union(set(val),descrp)
-                    jaccard_score = float(len(intersect))/float(len(union))
+                    descrp = set([lemmer.lemmatize(k.lower()) for k in nltk.word_tokenize(row[1]) if k not in string.punctuation and k not in eng_stopwords])   ## clean the description
+                    intersect = set.intersection(terms,descrp)  ## calculate intersection of description and terms
+                    union = set.union(set(val),descrp)  ## calculate union of val and description
+                    jaccard_score = float(len(intersect))/float(len(union)) ## calculate modified Jaccard coefficient
                     if jaccard_score != 0.0:
-                        if len(val) != 0 and len(val) < val_len and len(intersect) > len(val):
+                        if len(val) != 0 and len(val) < val_len and len(intersect) > len(val):  ## this means some words in 'terms' are part of intersect. So there is more context
                             more_context.append((row[0],jaccard_score))
                         else:
                             less_context.append((row[0],jaccard_score))
                 
-                if more_context:
+                if more_context:    ##  if more_context is not empty, then choose it
                     codes = more_context
                 else:
                     codes = less_context
-
+                
                 for code in codes:
                     node = code[0].split('.')[0]
                     try:
-                        if codes_dict[node][1] < code[1]:
+                        if codes_dict[node][1] < code[1]:   ##  replace codes that have lower jaccard score 
                             codes_dict[node] = code
                         elif codes_dict[node][1] == code[1]:
                             if len(codes_dict[node][0]) > len(code[0]):   ## For same node, pick the more general code(which is always shorter in length)
                                 codes_dict[node] = code
                     except KeyError:
                         codes_dict[node] = code
-
+            
             if codes_dict:
                 for v in codes_dict.values():
                     context_aware_codes[key].add(v)
