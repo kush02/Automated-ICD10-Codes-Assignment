@@ -138,13 +138,13 @@ def main():
 
     ##### Assigning ICD10 codes
     asg = Assigner('MESH_ICD10_Mapping.csv',mesh_id_mapping)
-    #mesh_codes = asg.assign_MESHterms_ICD10(ui); #print(len(mesh_codes))
+    #mesh_codes = asg.assign_MESHterms_ICD10(ui); #print(mesh_codes)
     #keywords_codes = asg.assign_keywords_ICD10(keywords); #print(len(keywords_codes))
     #titles_codes = asg.assign_titles_ICD10(titles); #print(len(titles_codes))
     #partial_codes = asg.assign_context_aware_codes(stopword_percent_include=0.92); #print(len(partial_codes))
-    tot = asg.assign_all_ICD10(ui,keywords,titles,stopword_percent_include=0.92)
+    total_codes = asg.assign_all_ICD10(ui,keywords,titles,stopword_percent_include=0.92)
     #print(tot)
-    asg.write_codes_to_csv(tot,'all_codes.csv')  # Case Reports_ICD10_Mapping.csv
+    #asg.write_codes_to_csv(tot,'all_codes.csv')  # Case Reports_ICD10_Mapping.csv
 
     ##### Comparing with labelled dataset
     import csv
@@ -174,7 +174,35 @@ def main():
     #print(overlap)
     #asg.write_codes_to_csv(overlap,'overlapping_codes.csv')
     #print(tot['722440'],labelled_dataset['722440'])
+    
+    import networkx as nx
+    #d = mesh_codes
+    d = total_codes#{'ID1':{('C3',0.7)},'ID2':{('D7',0.95),('C3',0.8)}}
+    G = nx.Graph()
+    for k in d.keys():
+        G.add_node(k,bipartite='pmid')
+        for v in d[k]:
+            G.add_node(v[0],bipartite='code')
+            G.add_edge(k,v[0],weight=v[1])
 
+    pos = nx.spring_layout(G,k=0.3)
+    nx.draw(G,pos,with_labels=True,node_size=80,font_size=10,width=5,edge_color='b')
+    figManager = plt.get_current_fig_manager()
+    figManager.window.state('zoomed')
+    plt.show()
+    """
+    pmid,code = nx.bipartite.sets(G)
+    code = set(code)
+    for i in pmid:
+        a = code - set(n for n in G[i])
+        print(i,a)
+        for j in a:
+            b = set(n for n in G[j])
+            print(j,b)
+    """
+
+
+    
     print(time.time()-start)
     """
     ## Do calculations on doc matrix
