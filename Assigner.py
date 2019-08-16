@@ -1,6 +1,3 @@
-import sys
-sys.dont_write_bytecode = True
-
 import nltk, collections, string, sklearn, itertools
 import matplotlib.pyplot as plt
 import pandas as pd

@@ -1,8 +1,6 @@
-import sys
-sys.dont_write_bytecode = True
-
 from TextFile import TextFile as Base
 import nltk, string, pickle, os, sklearn
+
 
 
 class Query(Base):

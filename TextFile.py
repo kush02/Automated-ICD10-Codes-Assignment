@@ -1,7 +1,5 @@
-import sys
-sys.dont_write_bytecode = True
-
 import nltk, string, sklearn
+
 
 class TextFile: 
     
